@@ -1,7 +1,7 @@
 {
   "name": "Tarifas de Energia Brasil",
   "domains": ["tarifas_energia_brasil"],
-  "content_in_root": true,
+  "content_in_root": false,
   "country": ["BR"],
   "homeassistant": "2025.1.0",
   "repository": "https://github.com/diogocaseca/ha_tarifas_energia_brasil",

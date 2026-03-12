@@ -2,13 +2,12 @@
   "domain": "tarifas_energia_brasil",
   "name": "Tarifas de Energia Brasil",
   "documentation": "https://github.com/diogocaseca/ha_tarifas_energia_brasil",
-  "issue_tracker": "https://github.com/diogocaseca/ha_tarifas_energia_brasil/issues",
   "codeowners": ["@vodikus", "@diogocaseca"],
   "requirements": [
     "aiohttp",
     "aiosqlite>=0.20.0"
   ],
-  "version": "1.0.6-rc10",
+  "version": "1.0.6-rc11",
   "config_flow": true,
   "iot_class": "cloud_polling"
 }
