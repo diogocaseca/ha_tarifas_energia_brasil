@@ -8,7 +8,7 @@
     "aiohttp",
     "aiosqlite>=0.20.0"
   ],
-  "version": "1.0.6-rc6",
+  "version": "1.0.6-rc7",
   "config_flow": true,
   "iot_class": "cloud_polling"
 }
