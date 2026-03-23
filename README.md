@@ -79,5 +79,8 @@ Se você achou este ou outros projetos úteis e gostaria de apoiá-los, há vár
 [!["Me Pagua um Café"](/docs/images/me-paga-um-cafe.png "Me Paga um Café")](https://mepagaumcafe.com.br/vodikus/)
 
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/vodikus)
--->
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/vodikus)-->
+
+## Seal
+
+![Selo Vibe Coding by Copilot](/docs/images/selo_gemini.png "Selo Vibe Coding by Copilot")
