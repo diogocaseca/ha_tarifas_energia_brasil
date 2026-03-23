@@ -71,6 +71,7 @@ Sinta-se à vontade para abrir issues ou pull requests para sugerir melhorias ou
 Este projeto está licenciado sob a [GNU General Public License v3.0 (GPL-3.0)](https://www.gnu.org/licenses/gpl-3.0.html).  
 Você pode usar, modificar e distribuir este software, desde que qualquer trabalho derivado também seja distribuído sob a mesma licença
 
+<!--
 ## Apoie o Projeto
 Se você achou este ou outros projetos úteis e gostaria de apoiá-los, há várias maneiras.
 
@@ -79,6 +80,4 @@ Se você achou este ou outros projetos úteis e gostaria de apoiá-los, há vár
 
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/vodikus)
-
-
-
+-->
