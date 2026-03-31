@@ -92,12 +92,8 @@ class TarifasEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class TarifasEnergiaOptionsFlow(config_entries.OptionsFlow):
+class TarifasEnergiaOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     """Permite editar concessionária e estado após a configuração inicial."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Inicializa o fluxo de opções."""
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Exibe/salva opções da integração."""
