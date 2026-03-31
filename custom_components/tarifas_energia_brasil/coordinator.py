@@ -40,7 +40,17 @@ class TarifasEnergiaCoordinator(DataUpdateCoordinator):
             # 2. Busca o nome da bandeira vigente para o mês corrente
             bandeira_vigente = await self.api.async_get_bandeira_vigente(date.today())
             if not bandeira_vigente:
-                raise UpdateFailed("Não foi possível obter a bandeira tarifária vigente.")
+                if self.data and self.data.get("bandeira_vigente"):
+                    bandeira_vigente = self.data["bandeira_vigente"]
+                    _LOGGER.warning(
+                        "Não foi possível obter a bandeira vigente na API; "
+                        "mantendo último valor conhecido: '%s'.",
+                        bandeira_vigente,
+                    )
+                else:
+                    raise UpdateFailed(
+                        "Não foi possível obter a bandeira tarifária vigente."
+                    )
 
             _LOGGER.info(
                 f"Atualização bem-sucedida. Bandeira vigente: '{bandeira_vigente}'."
@@ -52,6 +62,8 @@ class TarifasEnergiaCoordinator(DataUpdateCoordinator):
                 "bandeira_vigente": bandeira_vigente,
             }
 
+        except UpdateFailed:
+            raise
         except Exception as err:
             _LOGGER.error(f"Erro inesperado durante a atualização: {err}")
             raise UpdateFailed(f"Erro ao buscar dados: {err}")
