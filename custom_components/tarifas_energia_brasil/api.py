@@ -1,5 +1,7 @@
 """API Client para a integração Tarifas de Energia Brasil."""
 import asyncio
+import csv
+import io
 import logging
 import json
 import aiohttp
@@ -17,8 +19,14 @@ BANDEIRA_NAO_ENCONTRADA = "Bandeira não encontrada"
 
 # IDs dos recursos (datasets) na ANEEL
 RESOURCE_ID_TARIFAS = "fcf2906c-7c32-4b9b-a637-054e7a5234f4"
-# Dataset atualmente populado de bandeiras tarifarias (Adicional).
-RESOURCE_ID_BANDEIRAS = "5879ca80-b3bd-45b1-a135-d9b77c1d5b36"
+# Dataset de bandeiras tarifarias (Acionamento) solicitado para uso.
+RESOURCE_ID_BANDEIRAS = "0591b8f6-fe54-437b-b72b-1aa2efd46e42"
+URL_BANDEIRAS_CSV = (
+    "https://dadosabertos.aneel.gov.br/dataset/"
+    "7f43a020-6dc5-44b8-80b4-d97eaa94436c/resource/"
+    "0591b8f6-fe54-437b-b72b-1aa2efd46e42/download/"
+    "bandeira-tarifaria-acionamento.csv"
+)
 
 
 class TarifasEnergiaAPI:
@@ -97,6 +105,107 @@ class TarifasEnergiaAPI:
                     continue
                 raise
 
+    async def _async_get_text_with_retry(
+        self,
+        url: str,
+        request_name: str,
+        max_attempts: int = 3,
+    ) -> str:
+        """Faz request HTTP de texto com retry para erros transitórios."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with self._session.get(url) as response:
+                    response.raise_for_status()
+                    return await response.text()
+            except aiohttp.ClientResponseError as err:
+                should_retry = (
+                    err.status in RETRYABLE_STATUS_CODES and attempt < max_attempts
+                )
+                if should_retry:
+                    wait_seconds = attempt
+                    _LOGGER.warning(
+                        "%s falhou (tentativa %s/%s, status %s). "
+                        "Nova tentativa em %ss.",
+                        request_name,
+                        attempt,
+                        max_attempts,
+                        err.status,
+                        wait_seconds,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                raise
+            except aiohttp.ClientError:
+                if attempt < max_attempts:
+                    wait_seconds = attempt
+                    _LOGGER.warning(
+                        "%s falhou (tentativa %s/%s). Nova tentativa em %ss.",
+                        request_name,
+                        attempt,
+                        max_attempts,
+                        wait_seconds,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                raise
+
+    @staticmethod
+    def _parse_decimal_br(value: str | None) -> float:
+        """Converte decimal brasileiro para float."""
+        if value is None:
+            return 0.0
+        text = str(value).strip()
+        if text in {"", ",", ".", ",00", ".00"}:
+            return 0.0
+        return float(text.replace(".", "").replace(",", "."))
+
+    def _default_valores_bandeiras(self) -> dict[str, float]:
+        """Retorna estrutura padrão de valores de bandeira com adicional zero."""
+        return {
+            "Bandeira Verde": 0.0,
+            "Bandeira Amarela": 0.0,
+            "Bandeira Vermelha Patamar 1": 0.0,
+            "Bandeira Vermelha Patamar 2": 0.0,
+            BANDEIRA_NAO_ENCONTRADA: 0.0,
+        }
+
+    async def _async_get_latest_bandeira_from_csv(
+        self,
+        competencia: date,
+    ) -> dict | None:
+        """Lê o CSV da ANEEL e retorna a linha mais recente até a competência."""
+        try:
+            csv_text = await self._async_get_text_with_retry(
+                URL_BANDEIRAS_CSV,
+                "Download CSV de bandeiras",
+            )
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Erro ao baixar CSV de bandeiras: %s", err)
+            return None
+
+        reader = csv.DictReader(io.StringIO(csv_text), delimiter=";")
+        best_row: dict | None = None
+        best_date: date | None = None
+
+        for row in reader:
+            row_date = self._parse_iso_date(row.get("DatCompetencia"))
+            if row_date is None:
+                continue
+            if row_date > competencia:
+                continue
+            if best_date is None or row_date > best_date:
+                best_date = row_date
+                best_row = row
+
+        if best_row is None:
+            _LOGGER.error(
+                "CSV de bandeiras não possui registros válidos até a competência %s.",
+                competencia,
+            )
+            return None
+
+        return best_row
+
     async def _async_get_cached_tarifas(
         self, concessionaria_nome: str
     ) -> dict[str, float] | None:
@@ -116,66 +225,28 @@ class TarifasEnergiaAPI:
         return None
 
     async def _async_get_valores_bandeiras(self, competencia: date) -> dict[str, float] | None:
-        """Busca o adicional da última bandeira vigente no schema atual da ANEEL."""
-        sql_query = (
-            f'SELECT "DatVigencia", "NomBandeiraAcionada", '
-            f'"VlrAdicionalBandeiraRSMWh" '
-            f'FROM "{RESOURCE_ID_BANDEIRAS}" '
-            f'ORDER BY "DatVigencia" DESC '
-            f'LIMIT 1'
-        )
-        params = {"sql": sql_query}
+        """Busca valores de bandeiras no CSV de acionamento da ANEEL."""
+        record = await self._async_get_latest_bandeira_from_csv(competencia)
+        if record is None:
+            return None
+
+        bandeira_acionada = record.get("NomBandeiraAcionada")
+        dat_vigencia = record.get("DatCompetencia")
+
+        if self._is_bandeira_record_stale(dat_vigencia, competencia):
+            _LOGGER.warning(
+                "CSV de bandeiras defasado (DatCompetencia=%s). "
+                "Aplicando fallback de bandeira não encontrada com adicional 0.",
+                dat_vigencia,
+            )
+            return self._default_valores_bandeiras()
 
         try:
-            data = await self._async_get_json_with_retry(
-                URL_SQL_API,
-                params,
-                "Consulta de valores da bandeira vigente",
+            adicional = self._parse_decimal_br(
+                record.get("VlrAdicionalBandeira"),
             )
 
-            if not data.get("success"):
-                _LOGGER.error(
-                    "Consulta de valores de bandeiras sem sucesso: %s",
-                    data.get("error"),
-                )
-                return None
-
-            records = data.get("result", {}).get("records", [])
-            if not records:
-                _LOGGER.error(
-                    "Recurso de bandeiras sem registros disponíveis na ANEEL."
-                )
-                return None
-
-            record = records[0]
-            bandeira_acionada = record.get("NomBandeiraAcionada")
-            dat_vigencia = record.get("DatVigencia")
-
-            if self._is_bandeira_record_stale(dat_vigencia, competencia):
-                _LOGGER.warning(
-                    "Dataset de bandeiras defasado (DatVigencia=%s). "
-                    "Aplicando fallback para Bandeira Verde com adicional 0.",
-                    dat_vigencia,
-                )
-                return {
-                    "Bandeira Verde": 0.0,
-                    "Bandeira Amarela": 0.0,
-                    "Bandeira Vermelha Patamar 1": 0.0,
-                    "Bandeira Vermelha Patamar 2": 0.0,
-                    BANDEIRA_NAO_ENCONTRADA: 0.0,
-                }
-
-            adicional = float(
-                str(record.get("VlrAdicionalBandeiraRSMWh", 0.0)).replace(",", ".")
-            )
-
-            valores = {
-                "Bandeira Verde": 0.0,
-                "Bandeira Amarela": 0.0,
-                "Bandeira Vermelha Patamar 1": 0.0,
-                "Bandeira Vermelha Patamar 2": 0.0,
-                BANDEIRA_NAO_ENCONTRADA: 0.0,
-            }
+            valores = self._default_valores_bandeiras()
 
             mapa_bandeiras = {
                 "Verde": "Bandeira Verde",
@@ -191,7 +262,7 @@ class TarifasEnergiaAPI:
                 valores[chave_bandeira] = adicional
             else:
                 _LOGGER.warning(
-                    "Bandeira acionada desconhecida no dataset: %s",
+                    "Bandeira acionada desconhecida no CSV: %s",
                     bandeira_acionada,
                 )
                 valores[BANDEIRA_NAO_ENCONTRADA] = 0.0
@@ -203,15 +274,9 @@ class TarifasEnergiaAPI:
                 valores,
             )
             return valores
-
-        except aiohttp.ClientError as err:
-            _LOGGER.warning(
-                "Erro ao acessar API SQL de bandeiras: %s.",
-                err,
-            )
         except (ValueError, TypeError) as err:
             _LOGGER.warning(
-                "Erro ao processar dados de bandeiras no novo schema: %s.",
+                "Erro ao processar dados de bandeiras no CSV: %s.",
                 err,
             )
 
@@ -219,43 +284,23 @@ class TarifasEnergiaAPI:
 
 
     async def async_get_bandeira_vigente(self, competencia: date) -> str | None:
-        """Busca a última bandeira vigente disponível no dataset da ANEEL."""
-        sql_query = (
-            f'SELECT "DatVigencia", "NomBandeiraAcionada" '
-            f'FROM "{RESOURCE_ID_BANDEIRAS}" '
-            f'ORDER BY "DatVigencia" DESC '
-            f'LIMIT 1'
-        )
-        params = {"sql": sql_query}
+        """Busca a última bandeira vigente disponível no CSV da ANEEL."""
+        record = await self._async_get_latest_bandeira_from_csv(competencia)
+        if record is None:
+            _LOGGER.error("Não foi possível obter bandeira vigente no CSV da ANEEL.")
+            return BANDEIRA_NAO_ENCONTRADA
+
+        bandeira_acionada = record.get("NomBandeiraAcionada")
+        dat_vigencia = record.get("DatCompetencia")
+        if self._is_bandeira_record_stale(dat_vigencia, competencia):
+            _LOGGER.warning(
+                "Bandeira vigente da ANEEL está defasada (DatCompetencia=%s). "
+                "Usando fallback de bandeira não encontrada.",
+                dat_vigencia,
+            )
+            return BANDEIRA_NAO_ENCONTRADA
 
         try:
-            data = await self._async_get_json_with_retry(
-                URL_SQL_API,
-                params,
-                "Consulta da última bandeira vigente",
-            )
-
-            if not data.get("success"):
-                _LOGGER.error(
-                    "Consulta de bandeira vigente sem sucesso: %s",
-                    data.get("error"),
-                )
-                return None
-
-            records = data.get("result", {}).get("records", [])
-            if not records:
-                _LOGGER.error("Dataset de bandeiras sem registros para bandeira vigente.")
-                return BANDEIRA_NAO_ENCONTRADA
-
-            bandeira_acionada = records[0].get("NomBandeiraAcionada")
-            dat_vigencia = records[0].get("DatVigencia")
-            if self._is_bandeira_record_stale(dat_vigencia, competencia):
-                _LOGGER.warning(
-                    "Bandeira vigente da ANEEL está defasada (DatVigencia=%s). "
-                    "Usando fallback de bandeira não encontrada.",
-                    dat_vigencia,
-                )
-                return BANDEIRA_NAO_ENCONTRADA
 
             mapa_bandeiras = {
                 "Verde": "Bandeira Verde",
@@ -269,9 +314,6 @@ class TarifasEnergiaAPI:
                 bandeira_acionada,
                 BANDEIRA_NAO_ENCONTRADA,
             )
-
-        except aiohttp.ClientError as err:
-            _LOGGER.warning("Erro ao acessar API SQL de bandeiras: %s", err)
         except Exception as err:
             _LOGGER.warning("Erro inesperado ao processar bandeira: %s", err)
 
