@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, CONF_CONCESSIONARIA, CONF_ESTADO, DEFAULT_ESTADO
+from .const import DOMAIN, CONF_CONCESSIONARIA, CONF_ESTADO
 from .database import DatabaseManager
 from .api import TarifasEnergiaAPI
 from .coordinator import TarifasEnergiaCoordinator
@@ -23,7 +23,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 1. Obter a concessionária escolhida pelo usuário durante a configuração
     concessionaria_nome = entry.data[CONF_CONCESSIONARIA]
-    estado = entry.data.get(CONF_ESTADO, DEFAULT_ESTADO)
+    estado = entry.data.get(CONF_ESTADO)
+    if not estado:
+        _LOGGER.error(
+            "Configuração inválida: estado (UF) não definido para a entry '%s' (%s). "
+            "Reconfigure a integração para selecionar o estado e habilitar o cálculo de impostos.",
+            entry.title,
+            entry.entry_id,
+        )
+        return False
 
     # 2. Inicializar o gerenciador do banco de dados
     # O arquivo do banco de dados será salvo na pasta de configuração do HA
