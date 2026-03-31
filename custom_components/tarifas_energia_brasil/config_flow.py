@@ -7,7 +7,13 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, CONF_CONCESSIONARIA
+from .const import (
+    DOMAIN,
+    CONF_CONCESSIONARIA,
+    CONF_ESTADO,
+    DEFAULT_ESTADO,
+    ICMS_POR_ESTADO,
+)
 from .api import TarifasEnergiaAPI
 from .database import DatabaseManager
 
@@ -66,7 +72,10 @@ class TarifasEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Cria o esquema do formulário com a lista dinâmica
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_CONCESSIONARIA): vol.In(sorted(lista_concessionarias))
+                vol.Required(CONF_CONCESSIONARIA): vol.In(sorted(lista_concessionarias)),
+                vol.Required(CONF_ESTADO, default=DEFAULT_ESTADO): vol.In(
+                    sorted(ICMS_POR_ESTADO)
+                ),
             }
         )
 

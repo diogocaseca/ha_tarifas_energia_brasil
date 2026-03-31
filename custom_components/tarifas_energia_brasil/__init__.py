@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, CONF_CONCESSIONARIA
+from .const import DOMAIN, CONF_CONCESSIONARIA, CONF_ESTADO, DEFAULT_ESTADO
 from .database import DatabaseManager
 from .api import TarifasEnergiaAPI
 from .coordinator import TarifasEnergiaCoordinator
@@ -23,6 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 1. Obter a concessionária escolhida pelo usuário durante a configuração
     concessionaria_nome = entry.data[CONF_CONCESSIONARIA]
+    estado = entry.data.get(CONF_ESTADO, DEFAULT_ESTADO)
 
     # 2. Inicializar o gerenciador do banco de dados
     # O arquivo do banco de dados será salvo na pasta de configuração do HA
@@ -33,7 +34,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 3. Inicializar o cliente da API e o Coordenador
     session = async_get_clientsession(hass)
     api_client = TarifasEnergiaAPI(hass, session, db_manager)
-    coordinator = TarifasEnergiaCoordinator(hass, api_client, concessionaria_nome)
+    coordinator = TarifasEnergiaCoordinator(
+        hass,
+        api_client,
+        concessionaria_nome,
+        estado,
+    )
 
     # 4. Realizar a primeira busca de dados ao iniciar
     await coordinator.async_config_entry_first_refresh()
