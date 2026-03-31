@@ -15,7 +15,8 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 # IDs dos recursos (datasets) na ANEEL
 RESOURCE_ID_TARIFAS = "fcf2906c-7c32-4b9b-a637-054e7a5234f4"
-RESOURCE_ID_BANDEIRAS = "0591b8f6-fe54-437b-b72b-1aa2efd46e42"
+# Dataset atualmente populado de bandeiras tarifarias (Adicional).
+RESOURCE_ID_BANDEIRAS = "5879ca80-b3bd-45b1-a135-d9b77c1d5b36"
 
 
 class TarifasEnergiaAPI:
@@ -93,9 +94,10 @@ class TarifasEnergiaAPI:
     async def _async_get_valores_bandeiras(self, competencia: date) -> dict[str, float] | None:
         """Busca o adicional da última bandeira vigente no schema atual da ANEEL."""
         sql_query = (
-            f'SELECT "DatCompetencia", "NomBandeiraAcionada", "VlrAdicionalBandeira" '
+            f'SELECT "DatVigencia", "NomBandeiraAcionada", '
+            f'"VlrAdicionalBandeiraRSMWh" '
             f'FROM "{RESOURCE_ID_BANDEIRAS}" '
-            f'ORDER BY "DatCompetencia" DESC '
+            f'ORDER BY "DatVigencia" DESC '
             f'LIMIT 1'
         )
         params = {"sql": sql_query}
@@ -124,7 +126,7 @@ class TarifasEnergiaAPI:
             record = records[0]
             bandeira_acionada = record.get("NomBandeiraAcionada")
             adicional = float(
-                str(record.get("VlrAdicionalBandeira", 0.0)).replace(",", ".")
+                str(record.get("VlrAdicionalBandeiraRSMWh", 0.0)).replace(",", ".")
             )
 
             valores = {
@@ -155,7 +157,7 @@ class TarifasEnergiaAPI:
             _LOGGER.info(
                 "Valores de bandeira calculados a partir de '%s' (%s): %s",
                 bandeira_acionada,
-                record.get("DatCompetencia"),
+                record.get("DatVigencia"),
                 valores,
             )
             return valores
@@ -177,9 +179,9 @@ class TarifasEnergiaAPI:
     async def async_get_bandeira_vigente(self, competencia: date) -> str | None:
         """Busca a última bandeira vigente disponível no dataset da ANEEL."""
         sql_query = (
-            f'SELECT "DatCompetencia", "NomBandeiraAcionada" '
+            f'SELECT "DatVigencia", "NomBandeiraAcionada" '
             f'FROM "{RESOURCE_ID_BANDEIRAS}" '
-            f'ORDER BY "DatCompetencia" DESC '
+            f'ORDER BY "DatVigencia" DESC '
             f'LIMIT 1'
         )
         params = {"sql": sql_query}
