@@ -47,7 +47,10 @@ class TarifasEnergiaBaseSensor(CoordinatorEntity[TarifasEnergiaCoordinator], Sen
     @property
     def device_info(self):
         """Retorna as informações do dispositivo, usando o entry_id como identificador."""
-        concessionaria_nome = self.entry.data[CONF_CONCESSIONARIA]
+        concessionaria_nome = self.entry.options.get(
+            CONF_CONCESSIONARIA,
+            self.entry.data.get(CONF_CONCESSIONARIA),
+        )
         return {
             # Usa o entry_id para um identificador único e estável para o dispositivo.
             # Esta é a mudança principal para garantir que cada entrada crie um novo dispositivo.

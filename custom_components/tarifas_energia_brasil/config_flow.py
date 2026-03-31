@@ -24,6 +24,13 @@ class TarifasEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Retorna o fluxo de opções para edição da configuração."""
+        return TarifasEnergiaOptionsFlow(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -82,4 +89,64 @@ class TarifasEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Mostra o formulário para o usuário
         return self.async_show_form(
             step_id="user", data_schema=data_schema, errors=errors
+        )
+
+
+class TarifasEnergiaOptionsFlow(config_entries.OptionsFlow):
+    """Permite editar concessionária e estado após a configuração inicial."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Inicializa o fluxo de opções."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Exibe/salva opções da integração."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        db_path = self.hass.config.path(f"{DOMAIN}.sqlite")
+        db_manager = DatabaseManager(self.hass, db_path)
+        session = async_get_clientsession(self.hass)
+        api_client = TarifasEnergiaAPI(self.hass, session, db_manager)
+
+        await db_manager.async_setup_database()
+
+        success = await api_client.async_fetch_concessionarias()
+        if not success:
+            errors["base"] = "cannot_connect"
+            return self.async_show_form(step_id="init", errors=errors)
+
+        lista_concessionarias = await db_manager.async_get_all_concessionarias()
+        if not lista_concessionarias:
+            errors["base"] = "no_concessionarias"
+            return self.async_show_form(step_id="init", errors=errors)
+
+        concessionaria_atual = self.config_entry.options.get(
+            CONF_CONCESSIONARIA,
+            self.config_entry.data.get(CONF_CONCESSIONARIA),
+        )
+        estado_atual = self.config_entry.options.get(
+            CONF_ESTADO,
+            self.config_entry.data.get(CONF_ESTADO, DEFAULT_ESTADO),
+        )
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_CONCESSIONARIA,
+                    default=concessionaria_atual,
+                ): vol.In(sorted(lista_concessionarias)),
+                vol.Required(
+                    CONF_ESTADO,
+                    default=estado_atual,
+                ): vol.In(sorted(ICMS_POR_ESTADO)),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
+            errors=errors,
         )

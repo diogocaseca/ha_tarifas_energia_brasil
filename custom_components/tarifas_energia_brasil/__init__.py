@@ -22,8 +22,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     # 1. Obter a concessionária escolhida pelo usuário durante a configuração
-    concessionaria_nome = entry.data[CONF_CONCESSIONARIA]
-    estado = entry.data.get(CONF_ESTADO)
+    concessionaria_nome = entry.options.get(
+        CONF_CONCESSIONARIA,
+        entry.data.get(CONF_CONCESSIONARIA),
+    )
+    estado = entry.options.get(CONF_ESTADO, entry.data.get(CONF_ESTADO))
     if not estado:
         _LOGGER.error(
             "Configuração inválida: estado (UF) não definido para a entry '%s' (%s). "
