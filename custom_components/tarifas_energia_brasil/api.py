@@ -116,7 +116,14 @@ class TarifasEnergiaAPI:
             try:
                 async with self._session.get(url) as response:
                     response.raise_for_status()
-                    return await response.text()
+                    raw_bytes = await response.read()
+                    for encoding in ("utf-8", "latin-1", "cp1252"):
+                        try:
+                            return raw_bytes.decode(encoding)
+                        except UnicodeDecodeError:
+                            continue
+                    # Ultimo recurso: evita quebrar a atualização por caractere inválido.
+                    return raw_bytes.decode("utf-8", errors="replace")
             except aiohttp.ClientResponseError as err:
                 should_retry = (
                     err.status in RETRYABLE_STATUS_CODES and attempt < max_attempts
