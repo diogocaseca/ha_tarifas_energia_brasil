@@ -12,6 +12,8 @@ _LOGGER = logging.getLogger(__name__)
 # URL base da API da ANEEL para consultas SQL
 URL_SQL_API = "https://dadosabertos.aneel.gov.br/api/3/action/datastore_search_sql"
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_BANDEIRA_DATA_AGE_DAYS = 62
+BANDEIRA_NAO_ENCONTRADA = "Bandeira não encontrada"
 
 # IDs dos recursos (datasets) na ANEEL
 RESOURCE_ID_TARIFAS = "fcf2906c-7c32-4b9b-a637-054e7a5234f4"
@@ -27,6 +29,28 @@ class TarifasEnergiaAPI:
         self._hass = hass
         self._session = session
         self._db = db_manager
+
+    @staticmethod
+    def _parse_iso_date(date_str: str | None) -> date | None:
+        """Converte string YYYY-MM-DD em date, retornando None em erro."""
+        if not date_str:
+            return None
+        try:
+            return date.fromisoformat(str(date_str)[:10])
+        except (ValueError, TypeError):
+            return None
+
+    def _is_bandeira_record_stale(
+        self,
+        record_date_str: str | None,
+        reference_date: date,
+    ) -> bool:
+        """Indica se registro de bandeira está defasado em relação à data de referência."""
+        record_date = self._parse_iso_date(record_date_str)
+        if record_date is None:
+            return True
+        age_days = (reference_date - record_date).days
+        return age_days > MAX_BANDEIRA_DATA_AGE_DAYS
 
     async def _async_get_json_with_retry(
         self,
@@ -125,6 +149,22 @@ class TarifasEnergiaAPI:
 
             record = records[0]
             bandeira_acionada = record.get("NomBandeiraAcionada")
+            dat_vigencia = record.get("DatVigencia")
+
+            if self._is_bandeira_record_stale(dat_vigencia, competencia):
+                _LOGGER.warning(
+                    "Dataset de bandeiras defasado (DatVigencia=%s). "
+                    "Aplicando fallback para Bandeira Verde com adicional 0.",
+                    dat_vigencia,
+                )
+                return {
+                    "Bandeira Verde": 0.0,
+                    "Bandeira Amarela": 0.0,
+                    "Bandeira Vermelha Patamar 1": 0.0,
+                    "Bandeira Vermelha Patamar 2": 0.0,
+                    BANDEIRA_NAO_ENCONTRADA: 0.0,
+                }
+
             adicional = float(
                 str(record.get("VlrAdicionalBandeiraRSMWh", 0.0)).replace(",", ".")
             )
@@ -134,6 +174,7 @@ class TarifasEnergiaAPI:
                 "Bandeira Amarela": 0.0,
                 "Bandeira Vermelha Patamar 1": 0.0,
                 "Bandeira Vermelha Patamar 2": 0.0,
+                BANDEIRA_NAO_ENCONTRADA: 0.0,
             }
 
             mapa_bandeiras = {
@@ -153,11 +194,12 @@ class TarifasEnergiaAPI:
                     "Bandeira acionada desconhecida no dataset: %s",
                     bandeira_acionada,
                 )
+                valores[BANDEIRA_NAO_ENCONTRADA] = 0.0
 
             _LOGGER.info(
                 "Valores de bandeira calculados a partir de '%s' (%s): %s",
                 bandeira_acionada,
-                record.get("DatVigencia"),
+                dat_vigencia,
                 valores,
             )
             return valores
@@ -203,9 +245,18 @@ class TarifasEnergiaAPI:
             records = data.get("result", {}).get("records", [])
             if not records:
                 _LOGGER.error("Dataset de bandeiras sem registros para bandeira vigente.")
-                return None
+                return BANDEIRA_NAO_ENCONTRADA
 
             bandeira_acionada = records[0].get("NomBandeiraAcionada")
+            dat_vigencia = records[0].get("DatVigencia")
+            if self._is_bandeira_record_stale(dat_vigencia, competencia):
+                _LOGGER.warning(
+                    "Bandeira vigente da ANEEL está defasada (DatVigencia=%s). "
+                    "Usando fallback de bandeira não encontrada.",
+                    dat_vigencia,
+                )
+                return BANDEIRA_NAO_ENCONTRADA
+
             mapa_bandeiras = {
                 "Verde": "Bandeira Verde",
                 "Amarela": "Bandeira Amarela",
@@ -214,14 +265,17 @@ class TarifasEnergiaAPI:
                 "Vermelha P2": "Bandeira Vermelha Patamar 2",
                 "Vermelha Patamar 2": "Bandeira Vermelha Patamar 2",
             }
-            return mapa_bandeiras.get(bandeira_acionada, bandeira_acionada)
+            return mapa_bandeiras.get(
+                bandeira_acionada,
+                BANDEIRA_NAO_ENCONTRADA,
+            )
 
         except aiohttp.ClientError as err:
             _LOGGER.warning("Erro ao acessar API SQL de bandeiras: %s", err)
         except Exception as err:
             _LOGGER.warning("Erro inesperado ao processar bandeira: %s", err)
 
-        return None
+        return BANDEIRA_NAO_ENCONTRADA
 
 
     async def async_fetch_concessionarias(self) -> bool:
@@ -357,6 +411,7 @@ class TarifasEnergiaAPI:
             "Bandeira Amarela": tarifa_base + valores_bandeiras["Bandeira Amarela"],
             "Bandeira Vermelha Patamar 1": tarifa_base + valores_bandeiras["Bandeira Vermelha Patamar 1"],
             "Bandeira Vermelha Patamar 2": tarifa_base + valores_bandeiras["Bandeira Vermelha Patamar 2"],
+            BANDEIRA_NAO_ENCONTRADA: tarifa_base + valores_bandeiras[BANDEIRA_NAO_ENCONTRADA],
         }
         
         await self._db.async_update_tarifas(concessionaria_nome, tarifas_finais)
