@@ -188,7 +188,7 @@ class TarifasEnergiaAPI:
             )
         except aiohttp.ClientError as err:
             _LOGGER.warning("Erro ao baixar CSV de bandeiras: %s", err)
-            return None
+            return await self._async_get_latest_bandeira_from_sql(competencia)
 
         reader = csv.DictReader(io.StringIO(csv_text), delimiter=";")
         best_row: dict | None = None
@@ -209,9 +209,54 @@ class TarifasEnergiaAPI:
                 "CSV de bandeiras não possui registros válidos até a competência %s.",
                 competencia,
             )
-            return None
+            return await self._async_get_latest_bandeira_from_sql(competencia)
 
         return best_row
+
+    async def _async_get_latest_bandeira_from_sql(
+        self,
+        competencia: date,
+    ) -> dict | None:
+        """Busca a linha mais recente de bandeira pela API SQL da ANEEL."""
+        sql_query = (
+            f'SELECT "DatCompetencia", "NomBandeiraAcionada", "VlrAdicionalBandeira" '
+            f'FROM "{RESOURCE_ID_BANDEIRAS}" '
+            f'WHERE "DatCompetencia" <= \'{competencia.isoformat()}\' '
+            f'ORDER BY "DatCompetencia" DESC '
+            f'LIMIT 1'
+        )
+
+        params = {"sql": sql_query}
+
+        try:
+            data = await self._async_get_json_with_retry(
+                URL_SQL_API,
+                params,
+                "Consulta SQL de bandeiras",
+            )
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Erro ao consultar bandeiras via API SQL: %s", err)
+            return None
+
+        if not data.get("success"):
+            _LOGGER.error(
+                "A API SQL de bandeiras retornou erro: %s",
+                data.get("error"),
+            )
+            return None
+
+        records = data.get("result", {}).get("records", [])
+        if not records:
+            _LOGGER.error(
+                "API SQL de bandeiras sem registros válidos até a competência %s.",
+                competencia,
+            )
+            return None
+
+        _LOGGER.warning(
+            "Usando fallback da API SQL para bandeiras (download CSV indisponível)."
+        )
+        return records[0]
 
     async def _async_get_cached_tarifas(
         self, concessionaria_nome: str
@@ -294,8 +339,10 @@ class TarifasEnergiaAPI:
         """Busca a última bandeira vigente disponível no CSV da ANEEL."""
         record = await self._async_get_latest_bandeira_from_csv(competencia)
         if record is None:
-            _LOGGER.error("Não foi possível obter bandeira vigente no CSV da ANEEL.")
-            return BANDEIRA_NAO_ENCONTRADA
+            _LOGGER.error(
+                "Não foi possível obter bandeira vigente na ANEEL (CSV e fallback SQL indisponíveis)."
+            )
+            return None
 
         bandeira_acionada = record.get("NomBandeiraAcionada")
         dat_vigencia = record.get("DatCompetencia")
